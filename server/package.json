@@ -1,0 +1,13 @@
+{
+  "name": "chegutu-livestock-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sync backend + dashboard for the Chegutu Livestock Census offline PWA",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
