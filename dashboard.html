@@ -50,6 +50,12 @@
   .pill.verified-yes { background:#e7efe9; color:var(--green); border-color:var(--green); }
   .pill.verified-no { background:#fbeee2; color:#a05a1f; border-color:#a05a1f; }
   .stat.pending .n { color:#a05a1f; }
+  button.verify-btn {
+    margin-top:4px; border:1px solid var(--green); background:#fff; color:var(--green);
+    border-radius:6px; padding:3px 8px; font-size:10.5px; font-weight:600; cursor:pointer;
+  }
+  button.verify-btn:active { background:#e7efe9; }
+  button.verify-btn:disabled { opacity:0.6; cursor:default; }
 </style>
 </head>
 <body>
@@ -112,11 +118,29 @@ function renderFeed(rows) {
         <td>${escapeHtml(r.collection_date)}</td>
         <td>${(r.species||[]).map(s => `<span class="pill">${escapeHtml(s)}</span>`).join('') || '<span class="lag">none recorded</span>'}</td>
         <td>${fmtSourceCell(r.source)}</td>
-        <td>${fmtVerifiedCell(r.verified)}</td>
+        <td>${fmtVerifiedCell(r.verified, r.localId)}</td>
         <td>${fmtLagCell(r.sync_latency_ms)}</td>
       </tr>`).join('')}
     </tbody>
   </table>`;
+
+  // Event delegation so newly-rendered "Mark verified" buttons work without
+  // re-binding a listener on every refresh (the table is fully replaced every 4s).
+  wrap.querySelectorAll('button.verify-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      try {
+        const res = await fetch(`/api/submissions/${encodeURIComponent(btn.dataset.id)}/verify`, { method: 'PATCH' });
+        if (!res.ok) throw new Error('request failed');
+        await load();
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = 'Mark verified';
+        alert('Could not mark this as verified — check your connection and try again.');
+      }
+    });
+  });
 }
 
 // ---- Ward Report: aggregate synced submissions by ward, species, and breed/type ----
@@ -210,10 +234,10 @@ function fmtSourceCell(source) {
   const label = s === 'field' ? 'Field visit' : s === 'sms' ? 'SMS self-report' : s === 'ussd' ? 'USSD self-report' : escapeHtml(s);
   return `<span class="pill ${cls}">${label}</span>`;
 }
-function fmtVerifiedCell(verified) {
-  return verified === false
-    ? '<span class="pill verified-no">Pending review</span>'
-    : '<span class="pill verified-yes">Verified</span>';
+function fmtVerifiedCell(verified, localId) {
+  if (verified !== false) return '<span class="pill verified-yes">Verified</span>';
+  return `<span class="pill verified-no">Pending review</span><br>
+    <button class="verify-btn" data-id="${escapeHtml(localId)}">Mark verified</button>`;
 }
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

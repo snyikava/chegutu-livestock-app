@@ -16,13 +16,17 @@ installable offline-first web app, plus a small sync server and a live dashboard
   including how long it sat queued on the device before syncing. The dashboard has a
   second tab, **Ward Report**, that rolls the same live data up per ward — households
   reached, head counts and breed/type mix per species — computed straight from
-  `schema.js`, no separate reporting step required.
+  `schema.js`, no separate reporting step required. The dashboard and the submissions
+  API are protected — see **Access control** below.
 - `server/smsFlow.js` — the farmer self-report conversation (rabbits, poultry, goats
   only — see `self_report_strategy.pdf` for why those three) as a small state machine,
-  driven by real inbound SMS via the webhook below. Every column on the dashboard now
+  driven by real inbound SMS via the webhook below. Conversation state per phone number
+  persists to `server/data/sms_sessions.json`, so a server restart mid-conversation no
+  longer silently drops a farmer back to square one. Every column on the dashboard now
   distinguishes **Source** (field visit vs SMS self-report) and **Verified** (a
-  self-report lands as unverified until a councillor confirms it), and the Ward Report
-  cards show the field-visit/self-report split and how many are still pending review.
+  self-report lands as unverified until a councillor confirms it — see **Verifying a
+  self-report** below), and the Ward Report cards show the field-visit/self-report
+  split and how many are still pending review.
 
 ## The SMS self-report channel
 
@@ -48,6 +52,47 @@ sequence (SIM, Android phone, Telerivet account) and what it costs. Once that's 
 This channel needs the same public URL as the field dashboard (see below) — Telerivet
 has to be able to reach the webhook over the internet, not just your local network.
 
+Reply **2** ("Check my last report") looks up the most recent SMS self-report actually
+on file for that phone number and reports its species, date, and review status — it
+used to always claim none existed, regardless of history; that's now fixed.
+
+## Access control
+
+Two things are gated by a shared secret, each read from an environment variable. Both
+default to the placeholder `change-me-before-going-live` — the server logs a warning
+on startup if either is still on that default, the same way the SMS webhook already
+warns about `TELERIVET_WEBHOOK_SECRET`:
+
+- **`DASHBOARD_PASSWORD`** — gates `/dashboard.html` and `GET /api/submissions` with
+  standard HTTP Basic Auth (any username, this as the password). Browsers prompt for
+  it natively the first time and remember it for the browsing session, so nothing in
+  `dashboard.html` needed to change.
+- **`FIELD_ACCESS_TOKEN`** — gates `POST /api/submissions`, the endpoint the field app
+  syncs to. The PWA asks the enumerator for this once (a plain prompt), remembers it
+  on that device via `localStorage`, and sends it as an `X-Field-Token` header on every
+  sync. If the server rejects it (wrong code, or a new code was issued), the app clears
+  the stored value and prompts again on the next sync attempt. An enumerator can also
+  view or reset it any time via the **Code** button in the status bar.
+
+Without both of these set to real values, the dashboard and the submissions API are
+reachable — and the data behind them readable/writable — by anyone with the URL. Set
+them wherever `server.js` runs, the same way as the Telerivet secret:
+
+```
+DASHBOARD_PASSWORD=<a-real-password> FIELD_ACCESS_TOKEN=<a-real-shared-code> TELERIVET_WEBHOOK_SECRET=<your-long-random-string> npm start
+```
+
+On Render (or Railway/etc.), set these as environment variables on the service rather
+than in a committed file, so they're not sitting in source control.
+
+## Verifying a self-report
+
+A self-report lands "Pending review" until a councillor cross-checks it against the
+household. The Live Feed tab on the dashboard now has a **Mark verified** button on
+every pending row — previously there was no way to move a record out of that state at
+all, so a self-report stayed marked "pending" forever even after it had actually been
+confirmed in person.
+
 ## Run it
 
 ```
@@ -57,7 +102,8 @@ npm start
 ```
 
 Then open `http://localhost:3000/` for the field form and
-`http://localhost:3000/dashboard.html` for the live dashboard, in a second window.
+`http://localhost:3000/dashboard.html` for the live dashboard, in a second window —
+it will prompt for the dashboard password the first time.
 
 ## Test the offline behaviour for real
 

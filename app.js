@@ -55,6 +55,26 @@
     return "id-" + Date.now() + "-" + Math.random().toString(16).slice(2);
   }
 
+  // ---------- Field access token ----------
+  // The server now requires this on every POST /api/submissions (see
+  // server.js). Ask once, remember it on this device, and let the enumerator
+  // fix it from the status bar if it was mistyped or a new code goes out.
+  const TOKEN_KEY = "chegutu_field_token";
+  function getFieldToken() {
+    try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; }
+  }
+  function setFieldToken(v) {
+    try { localStorage.setItem(TOKEN_KEY, v || ""); } catch (e) { /* ignore — worst case, asks again next sync */ }
+  }
+  function ensureFieldToken() {
+    let t = getFieldToken();
+    if (!t) {
+      t = (window.prompt("Enter the field access code given to you by your supervisor:") || "").trim();
+      setFieldToken(t);
+    }
+    return t;
+  }
+
   // ---------- Rendering ----------
   const frontMatterEl = document.getElementById("front-matter");
   const groupsEl = document.getElementById("groups");
@@ -121,8 +141,10 @@
         </label>
       </div>
       <div class="group-body" id="body_${g.key}">
-        ${fields}
-        <div class="group-total" id="total_${g.key}"></div>
+        <div class="group-body-inner">
+          ${fields}
+          <div class="group-total" id="total_${g.key}"></div>
+        </div>
       </div>
     </div>`;
   }).join("");
@@ -157,6 +179,8 @@
   const statusDot = document.getElementById("status-dot");
   const statusText = document.getElementById("status-text");
   const queueBadge = document.getElementById("queue-badge");
+  const syncBtn = document.getElementById("sync-now");
+  const syncBtnLabel = document.getElementById("sync-btn-label");
   let isReallyOnline = false;
 
   async function checkConnectivity() {
@@ -186,6 +210,15 @@
   setInterval(checkConnectivity, 15000);
   checkConnectivity();
 
+  const codeBtn = document.getElementById("access-code-btn");
+  if (codeBtn) {
+    codeBtn.addEventListener("click", () => {
+      const current = getFieldToken();
+      const next = window.prompt("Field access code (from your supervisor):", current);
+      if (next !== null) setFieldToken(next.trim());
+    });
+  }
+
   // ---------- Toast ----------
   let toastTimer;
   function showToast(msg) {
@@ -204,7 +237,7 @@
     queueBadge.textContent = queuedCount + " queued";
     queueBadge.classList.toggle("zero", queuedCount === 0);
     if (all.length === 0) {
-      list.innerHTML = '<li style="color:#8a8a80">No submissions yet on this device.</li>';
+      list.innerHTML = '<li class="empty-row">No submissions yet on this device.</li>';
       return;
     }
     list.innerHTML = all.slice(0, 20).map((r) => {
@@ -220,15 +253,18 @@
   async function syncQueued() {
     if (syncing) return;
     syncing = true;
+    if (syncBtn) syncBtn.classList.add("syncing");
+    if (syncBtnLabel) syncBtnLabel.textContent = "Syncing…";
     try {
       const all = await dbAll();
       const queued = all.filter((r) => r.status === "queued");
       let synced = 0;
+      let authFailed = false;
       for (const record of queued) {
         try {
           const res = await fetch("/api/submissions", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", "X-Field-Token": ensureFieldToken() },
             body: JSON.stringify({ localId: record.localId, created_at: record.created_at, data: record.data }),
           });
           if (res.ok) {
@@ -236,6 +272,10 @@
             record.synced_at = new Date().toISOString();
             await dbUpdate(record);
             synced++;
+          } else if (res.status === 401) {
+            authFailed = true;
+            setFieldToken(""); // wrong/stale code — clear it so the next sync attempt asks again
+            break;
           } else {
             break; // server rejected — stop, keep the rest queued
           }
@@ -244,9 +284,12 @@
         }
       }
       if (synced > 0) showToast(`Synced ${synced} household${synced > 1 ? "s" : ""} to the server.`);
+      else if (authFailed) showToast("Access code not recognised — tap “Code” in the status bar to re-enter it.");
       await renderQueueList();
     } finally {
       syncing = false;
+      if (syncBtn) syncBtn.classList.remove("syncing");
+      if (syncBtnLabel) syncBtnLabel.textContent = "Sync now";
     }
   }
 

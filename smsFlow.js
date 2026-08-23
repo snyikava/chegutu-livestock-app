@@ -39,8 +39,21 @@ const STEPS = {
     },
     errorMsg: "Reply 1 or 2."
   },
+  // Looks up the most recent SMS self-report actually on file for this phone
+  // number (via opts.getLastReport, set on onEnter below) rather than always
+  // claiming none exists.
   check_last: {
-    prompt: () => "No previous self-report found for this number. Reply 9 to return to the menu.",
+    onEnter: (ctx, opts, phone) => {
+      ctx.lastReport = (opts && typeof opts.getLastReport === "function") ? opts.getLastReport(phone) : null;
+    },
+    prompt: (ctx) => {
+      const r = ctx.lastReport;
+      if (!r) return "No previous self-report found for this number. Reply 9 to return to the menu.";
+      const speciesLabel = (r.species && r.species[0]) || "livestock";
+      const when = new Date(r.received_at).toLocaleDateString();
+      const status = r.verified === false ? "pending review" : "verified";
+      return `Your last self-report: ${speciesLabel} on ${when} (${status}). Reply 9 to return to the menu.`;
+    },
     handle: (reply) => (reply.trim() === "9" ? "welcome" : null),
     errorMsg: "Reply 9 to return to the menu."
   },
@@ -134,7 +147,9 @@ const STEPS = {
  * @param {Map} sessionStore - Map<phoneNumber, {stepId, ctx}>, owned by the caller.
  * @param {string} phone - sender's phone number (used as the session key).
  * @param {string} text - the SMS body.
- * @param {{onSubmit: (data: object) => void}} opts - called once when a report is confirmed.
+ * @param {{onSubmit: (data: object) => void, getLastReport?: (phone: string) => object|null}} opts -
+ *   onSubmit is called once when a report is confirmed; getLastReport backs the
+ *   "Check my last report" menu option.
  * @returns {string} the reply text to send back.
  */
 function handleIncoming(sessionStore, phone, text, opts) {
@@ -146,11 +161,11 @@ function handleIncoming(sessionStore, phone, text, opts) {
   if (!session) {
     session = { stepId: "welcome", ctx: {} };
     sessionStore.set(phone, session);
-    return STEPS.welcome.prompt(session.ctx);
+    return STEPS.welcome.prompt(session.ctx, opts, phone);
   }
 
   const step = STEPS[session.stepId];
-  const next = step.handle(text || "", session.ctx);
+  const next = step.handle(text || "", session.ctx, opts, phone);
   if (!next) return step.errorMsg || "Sorry, that wasn't valid - try again.";
 
   session.stepId = next;
@@ -168,8 +183,8 @@ function handleIncoming(sessionStore, phone, text, opts) {
     ctx.species.fields.forEach((fname, i) => { data[fname] = String(ctx.counts[i]); });
     opts.onSubmit(data);
   }
-  if (nextStep.onEnter) nextStep.onEnter(session.ctx);
-  return nextStep.prompt(session.ctx);
+  if (nextStep.onEnter) nextStep.onEnter(session.ctx, opts, phone);
+  return nextStep.prompt(session.ctx, opts, phone);
 }
 
 module.exports = { handleIncoming, SELF_REPORT_SPECIES, STEPS };

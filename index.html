@@ -30,7 +30,8 @@
   <span class="dot offline" id="status-dot"></span>
   <span id="status-text">Checking connection…</span>
   <span id="queue-badge" class="zero">0 queued</span>
-  <button class="sync-btn" id="sync-now">Sync now</button>
+  <button class="code-btn" id="access-code-btn" title="Field access code">Code</button>
+  <button class="sync-btn" id="sync-now"><span class="spinner"></span><span id="sync-btn-label">Sync now</span></button>
 </div>
 
 <main>
@@ -51,7 +52,7 @@
 
     <div class="section-title">Queued on this device</div>
     <div class="card">
-      <ul class="queue-list" id="queue-list"><li style="color:#8a8a80">No submissions yet on this device.</li></ul>
+      <ul class="queue-list" id="queue-list"><li class="empty-row">No submissions yet on this device.</li></ul>
     </div>
   </form>
 </main>
